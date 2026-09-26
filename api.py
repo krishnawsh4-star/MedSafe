@@ -17,7 +17,10 @@ app = FastAPI(title="MedSafe API")
 # React frontend ko backend access karne dena
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+    "http://localhost:5173",
+    "https://medsafe-6e1o.onrender.com",
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
