@@ -1,0 +1,4 @@
+/* Global reset lives in App.css; this file is intentionally minimal. */
+html {
+  -webkit-text-size-adjust: 100%;
+}
