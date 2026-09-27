@@ -21,3 +21,11 @@ Files
 
 Frame size: change `width`/`height` in `.phone` in `App.css`.
 Colours: change the variables at the top of `App.css`.
+
+## 🚀 Live Demo
+
+Try the deployed MedSafe application:
+
+**[Open MedSafe →](https://medsafe-6e1o.onrender.com)**
+
+> MedSafe is a prototype medication-safety support tool designed to flag potential medication errors, allergies, drug interactions, drug-disease conflicts, and dosage-related concerns for clinician review.
