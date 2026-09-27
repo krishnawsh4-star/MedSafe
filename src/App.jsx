@@ -16,14 +16,23 @@ import Assistant, { makeGreeting } from "./components/Assistant.jsx";
 
 /* -------------------------------------------------------------------------
    STATIC DATA
+   NAV and TILES are keyed by role so a patient only ever sees the tabs and
+   shortcuts meant for them — doctors keep the original five tabs unchanged.
 ------------------------------------------------------------------------- */
-const NAV = [
-  { id: "home", label: "Home", icon: "🏠" },
-  { id: "check", label: "Check", icon: "💊" },
-  { id: "results", label: "Results", icon: "📋" },
-  { id: "history", label: "History", icon: "🕘" },
-  { id: "help", label: "Help", icon: "❓" },
-];
+const NAV = {
+  doctor: [
+    { id: "home", label: "Home", icon: "🏠" },
+    { id: "check", label: "Check", icon: "💊" },
+    { id: "results", label: "Results", icon: "📋" },
+    { id: "history", label: "History", icon: "🕘" },
+    { id: "help", label: "Help", icon: "❓" },
+  ],
+  patient: [
+    { id: "home", label: "Home", icon: "🏠" },
+    { id: "prescriptions", label: "My Prescriptions", icon: "📋" },
+    { id: "help", label: "Help", icon: "❓" },
+  ],
+};
 
 const TILES = {
   doctor: [
@@ -37,11 +46,7 @@ const TILES = {
     { icon: "📞", label: "Need help?", tone: "rose", tab: "help", filter: "all" },
   ],
   patient: [
-    { icon: "💊", label: "Check my medicine", tone: "sky", tab: "check", filter: "all" },
-    { icon: "⚠️", label: "Drug interactions", tone: "amber", tab: "check", filter: "Drug-Drug Interaction" },
-    { icon: "🤧", label: "Allergy alerts", tone: "azure", tab: "check", filter: "Allergy Interaction" },
-    { icon: "📋", label: "Latest report", tone: "indigo", tab: "results", filter: "all" },
-    { icon: "🕘", label: "My history", tone: "violet", tab: "history", filter: "all" },
+    { icon: "📋", label: "My prescriptions", tone: "indigo", tab: "prescriptions", filter: "all" },
     { icon: "📞", label: "Need help?", tone: "rose", tab: "help", filter: "all" },
   ],
 };
@@ -68,6 +73,43 @@ function loadHistory(userId) {
   } catch {
     return [];
   }
+}
+
+/* -------------------------------------------------------------------------
+   SHARED PRESCRIPTION STORE (doctor → patient)
+   There is no server-side link between a doctor and a patient account, so
+   a doctor's check is copied here — keyed by the patient's name, lowercased
+   — and a patient's "My Prescriptions" tab reads back anything matching
+   their own account name. This only ever ADDS an entry when a doctor
+   submits a check; it never changes what the doctor sees or does.
+------------------------------------------------------------------------- */
+const PRESCRIPTIONS_KEY = "medsafe-shared-prescriptions";
+
+function loadAllPrescriptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PRESCRIPTIONS_KEY));
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function sharePrescriptionWithPatient(report, doctorName) {
+  try {
+    const list = loadAllPrescriptions();
+    const entry = { ...report, patientKey: lc(report.patient.name), doctorName };
+    localStorage.setItem(PRESCRIPTIONS_KEY, JSON.stringify([entry, ...list].slice(0, 300)));
+  } catch {
+    /* storage unavailable: the patient just won't see this one automatically */
+  }
+}
+
+function loadPrescriptionsFor(name) {
+  const key = lc(name || "");
+  if (!key) return [];
+  return loadAllPrescriptions()
+    .filter((p) => p.patientKey === key)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 // Patients get their own details pre-filled; doctors start with an empty form.
@@ -204,7 +246,7 @@ function WarningCard({ w }) {
 }
 
 /* -------------------------------------------------------------------------
-   SCREENS
+   DOCTOR SCREENS (unchanged)
 ------------------------------------------------------------------------- */
 function HomeScreen({ user, latest, backend, onOpen }) {
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
@@ -430,7 +472,162 @@ function HistoryScreen({ role, history, onOpen, onClear }) {
   );
 }
 
-function HelpScreen() {
+/* -------------------------------------------------------------------------
+   PATIENT SCREENS
+   Patients no longer run their own checks — they only see what a doctor has
+   already checked for them, plus a home screen and help tailored to that.
+------------------------------------------------------------------------- */
+function PatientHomeScreen({ latest, onOpen }) {
+  const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+
+  return (
+    <div className="home-screen">
+      <section className="hero">
+        <div className="hero-text">
+          <p className="hero-date">{today}</p>
+          <h2>Your prescription safety reports</h2>
+          <div className="hero-row">
+            <div className="hero-pill">
+              <span aria-hidden="true">📋</span>
+              <span>
+                {latest
+                  ? `${latest.warnings.length} ${latest.warnings.length === 1 ? "warning" : "warnings"}`
+                  : "No prescriptions yet"}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="hero-art" aria-hidden="true">💊</div>
+      </section>
+
+      <section className="tiles" aria-label="What would you like to do?">
+        {TILES.patient.map((t) => (
+          <button key={t.label} type="button" className={`tile tone-${t.tone}`} onClick={() => onOpen(t)}>
+            <span className="tile-icon" aria-hidden="true">{t.icon}</span>
+            <span className="tile-label">{t.label}</span>
+          </button>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function PatientPrescriptionsScreen({ list, onOpen }) {
+  if (list.length === 0) {
+    return (
+      <div className="screen empty">
+        <span className="empty-icon" aria-hidden="true">📋</span>
+        <h2 className="screen-title">No prescriptions yet</h2>
+        <p>When your doctor checks a prescription for you in MedSafe, it will appear here.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="screen">
+      <h2 className="screen-title">My prescriptions</h2>
+      <ul className="history">
+        {list.map((r) => (
+          <li key={r.id}>
+            <button type="button" className="history-item" onClick={() => onOpen(r)}>
+              <span className="history-main">
+                <strong>{formatWhen(r.createdAt)}</strong>
+                <span>{r.doctorName || "Your doctor"}{r.demo ? " · demo data" : ""}</span>
+              </span>
+              <span className={`count-pill ${r.warnings.length ? "has" : "none"}`}>
+                {r.warnings.length} {r.warnings.length === 1 ? "warning" : "warnings"}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PatientPrescriptionDetail({ report, onBack }) {
+  const warnings = sortWarnings(report.warnings);
+  const highCount = warnings.filter((w) => sevKey(w.severity) === "high").length;
+
+  return (
+    <div className="screen">
+      <button type="button" className="link-btn" onClick={onBack}>← Back to my prescriptions</button>
+
+      <section className="hero hero-compact">
+        <div className="hero-text">
+          <p className="hero-date">Safety report{report.doctorName ? ` · ${report.doctorName}` : ""}</p>
+          <h2>{formatWhen(report.createdAt)}</h2>
+          <div className="hero-row">
+            <div className="hero-pill">
+              <span aria-hidden="true">{warnings.length === 0 ? "✅" : "⚠️"}</span>
+              <span>
+                {warnings.length === 0
+                  ? "No warnings found"
+                  : `${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}${highCount ? `, ${highCount} high` : ""}`}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="hero-art" aria-hidden="true">{warnings.length === 0 ? "✅" : "⚠️"}</div>
+      </section>
+
+      {warnings.length === 0 ? (
+        <div className="all-clear">
+          <strong>No known issues found</strong>
+          <p>This is not a guarantee of safety — always confirm with your doctor or pharmacist.</p>
+        </div>
+      ) : (
+        <div className="warn-grid">{warnings.map((w, i) => <WarningCard key={`${w.type}-${i}`} w={w} />)}</div>
+      )}
+
+      <p className="disclaimer">
+        Show this report to your doctor or pharmacist before you start, stop or change any medicine. MedSafe does not replace medical advice.
+      </p>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------
+   HELP (shared screen, role-specific content)
+   The doctor branch is the original content, unchanged.
+------------------------------------------------------------------------- */
+function HelpScreen({ role }) {
+  if (role === "patient") {
+    return (
+      <div className="screen">
+        <h2 className="screen-title">Need help?</h2>
+        <div className="card-row">
+          <section className="card">
+            <h3 className="card-title">How prescriptions reach you</h3>
+            <ol className="steps">
+              <li>Your doctor checks a new prescription for you in MedSafe.</li>
+              <li>They enter your name exactly as it appears on your MedSafe account.</li>
+              <li>The safety report appears here under "My Prescriptions" — nothing else for you to do.</li>
+            </ol>
+          </section>
+
+          <section className="card faq">
+            <details>
+              <summary>What does MedSafe check?</summary>
+              <p>Drug-to-drug interactions, allergies, conflicts with existing conditions, dosage limits and duplicate medicines.</p>
+            </details>
+            <details>
+              <summary>What does “Review Required” mean?</summary>
+              <p>The rule matched, but it needs a clinician to judge it, for example a dose that may be too high for you.</p>
+            </details>
+            <details>
+              <summary>I don't see a prescription my doctor mentioned</summary>
+              <p>Ask your doctor to check they typed your name exactly as it appears on your MedSafe account, then look again under "My Prescriptions".</p>
+            </details>
+            <details>
+              <summary>Where is my data stored?</summary>
+              <p>Prescription reports are stored in this browser. Nothing is sent anywhere else.</p>
+            </details>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="screen">
       <h2 className="screen-title">Need help?</h2>
@@ -483,6 +680,12 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
 
+  // Patient-only: prescriptions shared by a doctor, and which one (if any) is open.
+  const [prescriptions, setPrescriptions] = useState(() =>
+    user && user.role === "patient" ? loadPrescriptionsFor(user.name) : []
+  );
+  const [selectedRx, setSelectedRx] = useState(null);
+
   const contentRef = useRef(null);
 
   useEffect(() => {
@@ -497,6 +700,7 @@ export default function App() {
   useEffect(() => {
     contentRef.current?.scrollTo({ top: 0 });
     setMenuOpen(false);
+    setSelectedRx(null);
   }, [tab]);
 
   useEffect(() => {
@@ -505,6 +709,20 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen]);
+
+  // Keep a patient's prescription list current, including when a doctor
+  // checks something for them in another tab of the same browser.
+  useEffect(() => {
+    if (!user || user.role !== "patient") return undefined;
+    const refresh = () => setPrescriptions(loadPrescriptionsFor(user.name));
+    refresh();
+    window.addEventListener("storage", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [user, tab]);
 
   function enterApp(u) {
     setUser(u);
@@ -516,6 +734,8 @@ export default function App() {
     setFilter("all");
     setError("");
     setTab("home");
+    setPrescriptions(u.role === "patient" ? loadPrescriptionsFor(u.name) : []);
+    setSelectedRx(null);
   }
 
   function handleLogout() {
@@ -528,6 +748,8 @@ export default function App() {
     setHistory([]);
     setMessages([]);
     setForm(EMPTY_FORM);
+    setPrescriptions([]);
+    setSelectedRx(null);
   }
 
   const openTile = (t) => {
@@ -577,6 +799,13 @@ export default function App() {
     };
     setReport(next);
     setHistory((h) => [next, ...h].slice(0, 20));
+
+    // Also share doctor-run checks with the matching patient account, so
+    // they can see it under "My Prescriptions". Doesn't affect this screen.
+    if (user.role === "doctor") {
+      sharePrescriptionWithPatient(next, displayName(user));
+    }
+
     setLoading(false);
     setTab("results");
   }
@@ -646,7 +875,7 @@ export default function App() {
 
       <div className="body">
         <nav className="sidebar" aria-label="Main">
-          {NAV.map((t) => (
+          {NAV[user.role].map((t) => (
             <button
               key={t.id}
               type="button"
@@ -662,15 +891,29 @@ export default function App() {
 
         <main ref={contentRef} className="content">
           <div className="content-inner">
-            {tab === "home" && <HomeScreen user={user} latest={history[0]} backend={backend} onOpen={openTile} />}
-            {tab === "check" && (
+            {tab === "home" &&
+              (user.role === "doctor" ? (
+                <HomeScreen user={user} latest={history[0]} backend={backend} onOpen={openTile} />
+              ) : (
+                <PatientHomeScreen latest={prescriptions[0]} onOpen={openTile} />
+              ))}
+            {tab === "check" && user.role === "doctor" && (
               <CheckScreen role={user.role} form={form} setForm={setForm} onSubmit={submit} loading={loading} error={error} filter={filter} />
             )}
-            {tab === "results" && (
+            {tab === "results" && user.role === "doctor" && (
               <ResultsScreen role={user.role} report={report} filter={filter} setFilter={setFilter} onNew={startNewCheck} />
             )}
-            {tab === "history" && <HistoryScreen role={user.role} history={history} onOpen={openFromHistory} onClear={clearHistory} />}
-            {tab === "help" && <HelpScreen />}
+            {tab === "history" && user.role === "doctor" && (
+              <HistoryScreen role={user.role} history={history} onOpen={openFromHistory} onClear={clearHistory} />
+            )}
+            {tab === "prescriptions" && user.role === "patient" && (
+              selectedRx ? (
+                <PatientPrescriptionDetail report={selectedRx} onBack={() => setSelectedRx(null)} />
+              ) : (
+                <PatientPrescriptionsScreen list={prescriptions} onOpen={setSelectedRx} />
+              )
+            )}
+            {tab === "help" && <HelpScreen role={user.role} />}
           </div>
         </main>
       </div>

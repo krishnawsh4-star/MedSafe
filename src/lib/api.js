@@ -5,8 +5,8 @@
    Set it to false for a real deployment so failures show an error instead
    of sample results.
 ------------------------------------------------------------------------- */
-export const API_URL = import.meta.env.VITE_API_URL || "https://medsafe-api-sj17.onrender.com";
-export const ALLOW_DEMO_FALLBACK = true;
+export const API_URL = "http://127.0.0.1:8000";
+export const ALLOW_DEMO_FALLBACK = false;
 
 /* -------------------------------------------------------------------------
    SHARED HELPERS
@@ -283,4 +283,51 @@ export function localAnswer(text, { report }) {
     return "You're welcome! Ask me anything else whenever you like.";
   }
   return "I can help with drug interactions, allergies, doses, your latest report and how to use the app. For other questions the full AI service needs to be connected. Until then, please ask a doctor or pharmacist.";
+}
+
+/* -------------------------------------------------------------------------
+   PATIENT APP-HELP ASSISTANT
+   Patients no longer run their own checks, so their assistant is scoped to
+   three things only: what MedSafe is, how to view a prescription a doctor
+   has shared with them, and how to get around the app. It never answers
+   medical questions (interactions, doses, severity meanings, etc.) — those
+   stay with askBot()/localAnswer() above, which the doctor assistant still
+   uses unchanged. The emergency and crisis checks are kept as a safety net
+   even though they're outside that scope.
+------------------------------------------------------------------------- */
+export function localPatientAnswer(text) {
+  const t = lc(text);
+
+  if (/(chest pain|can'?t breathe|cannot breathe|difficulty breathing|trouble breathing|overdose|unconscious|seizure|severe bleeding|throat (is )?swelling|swelling of (the )?(face|throat|tongue))/.test(t)) {
+    return "This could be an emergency. Call your local emergency number now (112 in India) or go to the nearest hospital. Please don't wait for the app.";
+  }
+  if (/(suicid|kill myself|end my life|self.?harm|hurt myself)/.test(t)) {
+    return "I'm really sorry you're feeling this way, and I'm glad you said it. Please reach out to someone right now: a person you trust, or a crisis line. In India you can call Tele-MANAS on 14416, or call 112 if you are in immediate danger.";
+  }
+  if (/^(hi|hello|hey|namaste|good (morning|afternoon|evening))\b/.test(t)) {
+    return "Hello! I can help you find your way around MedSafe, like seeing a prescription your doctor has checked for you. What would you like to know?";
+  }
+  if (/(what is medsafe|about medsafe|what does medsafe do|what('?s| is) this app)/.test(t)) {
+    return "MedSafe is a safety check your doctor runs before prescribing you a new medicine. It looks for drug interactions, allergy conflicts, condition conflicts, dosage issues and duplicate medicines, then shares the report with you here.";
+  }
+  if (/(prescription|report|see my|find my|where.*(report|prescription)|latest)/.test(t)) {
+    return 'Open the "My Prescriptions" tab from the menu on the left. Every safety report your doctor has checked for you appears there, most recent first — tap one to see the details.';
+  }
+  if (/(how.*(use|navigate|work)|get around|tabs?|menu|home screen)/.test(t)) {
+    return 'MedSafe has three areas for you: Home (a quick summary), My Prescriptions (every report your doctor has shared) and Help (this guide). Use the menu on the left to move between them.';
+  }
+  if (/(log ?out|sign ?out)/.test(t)) {
+    return "Tap your initial in the top right corner and choose \"Log out\".";
+  }
+  if (/(account|log ?in|sign ?up|password|email)/.test(t)) {
+    return "Your doctor matches reports to you using the name on your MedSafe account, so make sure it's entered correctly. For anything else about your account, use the menu in the top right.";
+  }
+  if (/(don'?t see|missing|not (showing|appearing)|can'?t find)/.test(t)) {
+    return 'If a prescription you\'re expecting isn\'t showing yet, ask your doctor to double-check they typed your name exactly as it appears on your MedSafe account, then check "My Prescriptions" again.';
+  }
+  if (/(thank|thanks|thx)/.test(t)) {
+    return "You're welcome! Let me know if you need help finding anything else in the app.";
+  }
+
+  return "I can only help with using the MedSafe app, like finding a prescription your doctor has shared with you, or getting around the app. For questions about your medicines or health, please talk to your doctor or pharmacist.";
 }

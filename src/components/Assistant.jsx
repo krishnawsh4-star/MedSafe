@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { askBot, localAnswer } from "../lib/api.js";
+import { askBot, localAnswer, localPatientAnswer } from "../lib/api.js";
 
-const SUGGESTIONS = [
-  "Explain my latest report",
-  "What do the severity levels mean?",
-  "How does a check work?",
-];
+const SUGGESTIONS = {
+  doctor: [
+    "Explain my latest report",
+    "What do the severity levels mean?",
+    "How does a check work?",
+  ],
+  patient: [
+    "How do I see my prescriptions?",
+    "What is MedSafe?",
+    "How do I get around the app?",
+  ],
+};
 
 // Web Speech API: works in Chrome, Edge and Safari. Not in Firefox.
 const SpeechRecognition =
@@ -19,7 +26,7 @@ export function makeGreeting(displayName, role) {
   const text =
     role === "doctor"
       ? `Hello ${displayName}. Ask me about drug interactions, allergies, doses or how to read a report.`
-      : `Hi ${displayName}! I can help you understand your medicine checks. Ask me anything about interactions, allergies or doses.`;
+      : `Hi ${displayName}! I can help you use the MedSafe app, like finding a prescription your doctor has shared with you. Ask me anything about the app.`;
   return { id: nextId(), role: "assistant", content: text };
 }
 
@@ -114,11 +121,16 @@ export default function Assistant({ user, report, messages, setMessages }) {
 
     let reply;
     let basic = false;
-    try {
-      reply = await askBot({ messages: history, role: user.role, report });
-    } catch {
-      reply = localAnswer(text, { report });
-      basic = true;
+    if (user.role === "patient") {
+      // Patients only get app-help answers — never the general/medical assistant.
+      reply = localPatientAnswer(text);
+    } else {
+      try {
+        reply = await askBot({ messages: history, role: user.role, report });
+      } catch {
+        reply = localAnswer(text, { report });
+        basic = true;
+      }
     }
 
     setMessages((m) => [...m, { id: nextId(), role: "assistant", content: reply, basic }]);
@@ -132,8 +144,8 @@ export default function Assistant({ user, report, messages, setMessages }) {
     <div className="assistant-screen">
       <div className="assistant-bar">
         <div>
-          <strong>MedSafe assistant</strong>
-          <span>General information, not medical advice</span>
+          <strong>{user.role === "patient" ? "MedSafe guide" : "MedSafe assistant"}</strong>
+          <span>{user.role === "patient" ? "Help using the app" : "General information, not medical advice"}</span>
         </div>
         {canSpeak && (
           <button type="button" className={`speak-btn ${speakOn ? "on" : ""}`} aria-pressed={speakOn} onClick={toggleSpeak}>
@@ -154,7 +166,7 @@ export default function Assistant({ user, report, messages, setMessages }) {
 
         {onlyGreeting && !loading && (
           <div className="suggest">
-            {SUGGESTIONS.map((s) => (
+            {(SUGGESTIONS[user.role] || SUGGESTIONS.doctor).map((s) => (
               <button key={s} type="button" onClick={() => send(s)}>{s}</button>
             ))}
           </div>
