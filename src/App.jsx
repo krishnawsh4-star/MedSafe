@@ -13,6 +13,15 @@ import {
 import { getSessionUser, logOut } from "./lib/auth.js";
 import { AuthScreen, RoleScreen } from "./components/Onboarding.jsx";
 import Assistant, { makeGreeting } from "./components/Assistant.jsx";
+import GivePrescription from "./components/GivePrescription.jsx";
+import {
+  daysText,
+  loadPrescriptionsFor,
+  newDraft,
+  perDay,
+  savePrescriptionForPatient,
+  takePendingRx,
+} from "./lib/rxLink.js";
 
 /* -------------------------------------------------------------------------
    STATIC DATA
@@ -24,6 +33,7 @@ const NAV = {
     { id: "home", label: "Home", icon: "🏠" },
     { id: "check", label: "Check", icon: "💊" },
     { id: "results", label: "Results", icon: "📋" },
+    { id: "give", label: "Give Prescription", icon: "📝" },
     { id: "history", label: "History", icon: "🕘" },
     { id: "help", label: "Help", icon: "❓" },
   ],
@@ -73,43 +83,6 @@ function loadHistory(userId) {
   } catch {
     return [];
   }
-}
-
-/* -------------------------------------------------------------------------
-   SHARED PRESCRIPTION STORE (doctor → patient)
-   There is no server-side link between a doctor and a patient account, so
-   a doctor's check is copied here — keyed by the patient's name, lowercased
-   — and a patient's "My Prescriptions" tab reads back anything matching
-   their own account name. This only ever ADDS an entry when a doctor
-   submits a check; it never changes what the doctor sees or does.
-------------------------------------------------------------------------- */
-const PRESCRIPTIONS_KEY = "medsafe-shared-prescriptions";
-
-function loadAllPrescriptions() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PRESCRIPTIONS_KEY));
-    return Array.isArray(saved) ? saved : [];
-  } catch {
-    return [];
-  }
-}
-
-function sharePrescriptionWithPatient(report, doctorName) {
-  try {
-    const list = loadAllPrescriptions();
-    const entry = { ...report, patientKey: lc(report.patient.name), doctorName };
-    localStorage.setItem(PRESCRIPTIONS_KEY, JSON.stringify([entry, ...list].slice(0, 300)));
-  } catch {
-    /* storage unavailable: the patient just won't see this one automatically */
-  }
-}
-
-function loadPrescriptionsFor(name) {
-  const key = lc(name || "");
-  if (!key) return [];
-  return loadAllPrescriptions()
-    .filter((p) => p.patientKey === key)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 // Patients get their own details pre-filled; doctors start with an empty form.
@@ -491,7 +464,9 @@ function PatientHomeScreen({ latest, onOpen }) {
               <span aria-hidden="true">📋</span>
               <span>
                 {latest
-                  ? `${latest.warnings.length} ${latest.warnings.length === 1 ? "warning" : "warnings"}`
+                  ? latest.medicines?.length
+                    ? `${latest.medicines.length} ${latest.medicines.length === 1 ? "medicine" : "medicines"}`
+                    : `${latest.warnings.length} ${latest.warnings.length === 1 ? "warning" : "warnings"}`
                   : "No prescriptions yet"}
               </span>
             </div>
@@ -518,7 +493,7 @@ function PatientPrescriptionsScreen({ list, onOpen }) {
       <div className="screen empty">
         <span className="empty-icon" aria-hidden="true">📋</span>
         <h2 className="screen-title">No prescriptions yet</h2>
-        <p>When your doctor checks a prescription for you in MedSafe, it will appear here.</p>
+        <p>When your doctor gives you a prescription QR code, scan it with your phone camera and save it. It will appear here.</p>
       </div>
     );
   }
@@ -526,27 +501,38 @@ function PatientPrescriptionsScreen({ list, onOpen }) {
     <div className="screen">
       <h2 className="screen-title">My prescriptions</h2>
       <ul className="history">
-        {list.map((r) => (
-          <li key={r.id}>
-            <button type="button" className="history-item" onClick={() => onOpen(r)}>
-              <span className="history-main">
-                <strong>{formatWhen(r.createdAt)}</strong>
-                <span>{r.doctorName || "Your doctor"}{r.demo ? " · demo data" : ""}</span>
-              </span>
-              <span className={`count-pill ${r.warnings.length ? "has" : "none"}`}>
-                {r.warnings.length} {r.warnings.length === 1 ? "warning" : "warnings"}
-              </span>
-            </button>
-          </li>
-        ))}
+        {list.map((r) => {
+          const meds = r.medicines?.length || 0;
+          return (
+            <li key={r.id}>
+              <button type="button" className="history-item" onClick={() => onOpen(r)}>
+                <span className="history-main">
+                  <strong>{formatWhen(r.createdAt)}</strong>
+                  <span>{r.doctorName || "Your doctor"}{r.demo ? " · demo data" : ""}</span>
+                </span>
+                {meds ? (
+                  <span className="count-pill info">{meds} {meds === 1 ? "medicine" : "medicines"}</span>
+                ) : (
+                  <span className={`count-pill ${r.warnings.length ? "has" : "none"}`}>
+                    {r.warnings.length} {r.warnings.length === 1 ? "warning" : "warnings"}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
 }
 
 function PatientPrescriptionDetail({ report, onBack }) {
-  const warnings = sortWarnings(report.warnings);
+  const meds = report.medicines || [];
+  const warnings = sortWarnings(report.warnings || []);
   const highCount = warnings.filter((w) => sevKey(w.severity) === "high").length;
+  const s = report.summary;
+  const sTotal = s ? s.high + s.moderate + s.low + s.review : 0;
+  const hasMeds = meds.length > 0;
 
   return (
     <div className="screen">
@@ -554,33 +540,73 @@ function PatientPrescriptionDetail({ report, onBack }) {
 
       <section className="hero hero-compact">
         <div className="hero-text">
-          <p className="hero-date">Safety report{report.doctorName ? ` · ${report.doctorName}` : ""}</p>
+          <p className="hero-date">{hasMeds ? "Prescription" : "Safety report"}{report.doctorName ? ` · ${report.doctorName}` : ""}</p>
           <h2>{formatWhen(report.createdAt)}</h2>
           <div className="hero-row">
             <div className="hero-pill">
-              <span aria-hidden="true">{warnings.length === 0 ? "✅" : "⚠️"}</span>
+              <span aria-hidden="true">{hasMeds ? "📝" : warnings.length === 0 ? "✅" : "⚠️"}</span>
               <span>
-                {warnings.length === 0
-                  ? "No warnings found"
-                  : `${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}${highCount ? `, ${highCount} high` : ""}`}
+                {hasMeds
+                  ? `${meds.length} ${meds.length === 1 ? "medicine" : "medicines"}`
+                  : warnings.length === 0
+                    ? "No warnings found"
+                    : `${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}${highCount ? `, ${highCount} high` : ""}`}
               </span>
             </div>
           </div>
         </div>
-        <div className="hero-art" aria-hidden="true">{warnings.length === 0 ? "✅" : "⚠️"}</div>
+        <div className="hero-art" aria-hidden="true">{hasMeds ? "📝" : warnings.length === 0 ? "✅" : "⚠️"}</div>
       </section>
 
-      {warnings.length === 0 ? (
-        <div className="all-clear">
-          <strong>No known issues found</strong>
-          <p>This is not a guarantee of safety — always confirm with your doctor or pharmacist.</p>
-        </div>
-      ) : (
-        <div className="warn-grid">{warnings.map((w, i) => <WarningCard key={`${w.type}-${i}`} w={w} />)}</div>
+      {hasMeds && (
+        <section className="card">
+          <h3 className="card-title">Your medicines</h3>
+          <ul className="rx-meds">
+            {meds.map((m, i) => (
+              <li key={`${m.name}-${i}`} className="rx-med">
+                <div>
+                  <strong>{m.name}</strong>
+                  <span className="rx-dose">{m.dosage} mg</span>
+                </div>
+                <p>{perDay(m.times)} · for {daysText(m.days)}</p>
+                <p className="rx-total">{m.times * m.days} doses in total</p>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
+      {hasMeds && s && (
+        <section className="card">
+          <h3 className="card-title">MedSafe safety check</h3>
+          {sTotal === 0 ? (
+            <p>No warnings were found for these medicines. This is not a guarantee of safety, so please confirm with your doctor or pharmacist.</p>
+          ) : (
+            <>
+              <p>The safety check found {sTotal} {sTotal === 1 ? "warning" : "warnings"}. Please ask your doctor or pharmacist about them.</p>
+              <div className="rx-chips">
+                {s.high > 0 && <span className="sev-pill sev-high">High · {s.high}</span>}
+                {s.moderate > 0 && <span className="sev-pill sev-moderate">Moderate · {s.moderate}</span>}
+                {s.review > 0 && <span className="sev-pill sev-review">Review · {s.review}</span>}
+                {s.low > 0 && <span className="sev-pill sev-low">Low · {s.low}</span>}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {!hasMeds &&
+        (warnings.length === 0 ? (
+          <div className="all-clear">
+            <strong>No known issues found</strong>
+            <p>This is not a guarantee of safety — always confirm with your doctor or pharmacist.</p>
+          </div>
+        ) : (
+          <div className="warn-grid">{warnings.map((w, i) => <WarningCard key={`${w.type}-${i}`} w={w} />)}</div>
+        ))}
+
       <p className="disclaimer">
-        Show this report to your doctor or pharmacist before you start, stop or change any medicine. MedSafe does not replace medical advice.
+        Take your medicines exactly as your doctor has written them, and show this to your doctor or pharmacist before you start, stop or change anything. MedSafe does not replace medical advice.
       </p>
     </div>
   );
@@ -599,9 +625,9 @@ function HelpScreen({ role }) {
           <section className="card">
             <h3 className="card-title">How prescriptions reach you</h3>
             <ol className="steps">
-              <li>Your doctor checks a new prescription for you in MedSafe.</li>
-              <li>They enter your name exactly as it appears on your MedSafe account.</li>
-              <li>The safety report appears here under "My Prescriptions" — nothing else for you to do.</li>
+              <li>Your doctor checks your medicines in MedSafe and writes your prescription.</li>
+              <li>They show you a QR code. Scan it with your phone's camera and open the link.</li>
+              <li>Tap "Save to My Prescriptions" (log in as a patient first) and it appears here.</li>
             </ol>
           </section>
 
@@ -615,12 +641,12 @@ function HelpScreen({ role }) {
               <p>The rule matched, but it needs a clinician to judge it, for example a dose that may be too high for you.</p>
             </details>
             <details>
-              <summary>I don't see a prescription my doctor mentioned</summary>
-              <p>Ask your doctor to check they typed your name exactly as it appears on your MedSafe account, then look again under "My Prescriptions".</p>
+              <summary>I don't see a prescription my doctor gave me</summary>
+              <p>Prescriptions only appear here after you save them. Scan the QR code again and tap "Save to My Prescriptions" while logged in as a patient.</p>
             </details>
             <details>
               <summary>Where is my data stored?</summary>
-              <p>Prescription reports are stored in this browser. Nothing is sent anywhere else.</p>
+              <p>Saved prescriptions are stored in this browser on this device. Nothing is sent anywhere else.</p>
             </details>
           </section>
         </div>
@@ -686,6 +712,9 @@ export default function App() {
   );
   const [selectedRx, setSelectedRx] = useState(null);
 
+  // Doctor-only: the Give Prescription draft lives here so it survives switching tabs.
+  const [rx, setRx] = useState(newDraft);
+
   const contentRef = useRef(null);
 
   useEffect(() => {
@@ -724,6 +753,16 @@ export default function App() {
     };
   }, [user, tab]);
 
+  // A prescription scanned before logging in is saved as soon as the patient logs in.
+  useEffect(() => {
+    if (!user || user.role !== "patient") return;
+    const pending = takePendingRx();
+    if (!pending) return;
+    savePrescriptionForPatient(user, pending);
+    setPrescriptions(loadPrescriptionsFor(user.name));
+    setTab("prescriptions");
+  }, [user]);
+
   function enterApp(u) {
     setUser(u);
     setHistory(loadHistory(u.id));
@@ -736,6 +775,7 @@ export default function App() {
     setTab("home");
     setPrescriptions(u.role === "patient" ? loadPrescriptionsFor(u.name) : []);
     setSelectedRx(null);
+    setRx(newDraft());
   }
 
   function handleLogout() {
@@ -750,6 +790,7 @@ export default function App() {
     setForm(EMPTY_FORM);
     setPrescriptions([]);
     setSelectedRx(null);
+    setRx(newDraft());
   }
 
   const openTile = (t) => {
@@ -796,15 +837,10 @@ export default function App() {
       patient: { name: form.patient_name.trim(), age: Number(form.age), weight: Number(form.weight) },
       warnings,
       demo,
+      medicines: form.new_medicines.map(({ name, dosage }) => ({ name, dosage })),
     };
     setReport(next);
     setHistory((h) => [next, ...h].slice(0, 20));
-
-    // Also share doctor-run checks with the matching patient account, so
-    // they can see it under "My Prescriptions". Doesn't affect this screen.
-    if (user.role === "doctor") {
-      sharePrescriptionWithPatient(next, displayName(user));
-    }
 
     setLoading(false);
     setTab("results");
@@ -902,6 +938,15 @@ export default function App() {
             )}
             {tab === "results" && user.role === "doctor" && (
               <ResultsScreen role={user.role} report={report} filter={filter} setFilter={setFilter} onNew={startNewCheck} />
+            )}
+            {tab === "give" && user.role === "doctor" && (
+              <GivePrescription
+                doctorName={displayName(user)}
+                latest={history[0] || null}
+                draft={rx}
+                setDraft={setRx}
+                onGoCheck={() => setTab("check")}
+              />
             )}
             {tab === "history" && user.role === "doctor" && (
               <HistoryScreen role={user.role} history={history} onOpen={openFromHistory} onClear={clearHistory} />

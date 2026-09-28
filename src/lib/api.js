@@ -308,22 +308,25 @@ export function localPatientAnswer(text) {
     return "Hello! I can help you find your way around MedSafe, like seeing a prescription your doctor has checked for you. What would you like to know?";
   }
   if (/(what is medsafe|about medsafe|what does medsafe do|what('?s| is) this app)/.test(t)) {
-    return "MedSafe is a safety check your doctor runs before prescribing you a new medicine. It looks for drug interactions, allergy conflicts, condition conflicts, dosage issues and duplicate medicines, then shares the report with you here.";
+    return "MedSafe is a safety check your doctor runs before prescribing you a new medicine. It looks for drug interactions, allergy conflicts, condition conflicts, dosage issues and duplicate medicines, then gives you the prescription as a QR code that you can keep in this app.";
+  }
+  if (/(qr|scan|camera)/.test(t)) {
+    return 'After your doctor writes your prescription they will show you a QR code. Point your phone camera at it and open the link that appears. Your prescription opens straight away, with no login needed. To keep it, log in as a patient and tap "Save to My Prescriptions". It then appears in the My Prescriptions tab.';
   }
   if (/(prescription|report|see my|find my|where.*(report|prescription)|latest)/.test(t)) {
-    return 'Open the "My Prescriptions" tab from the menu on the left. Every safety report your doctor has checked for you appears there, most recent first — tap one to see the details.';
+    return 'Open the "My Prescriptions" tab from the menu on the left. Every prescription you have saved appears there, most recent first. Tap one to see your medicines, how often to take them and for how many days. If you have not saved one yet, scan the QR code your doctor gave you and tap "Save to My Prescriptions".';
   }
   if (/(how.*(use|navigate|work)|get around|tabs?|menu|home screen)/.test(t)) {
-    return 'MedSafe has three areas for you: Home (a quick summary), My Prescriptions (every report your doctor has shared) and Help (this guide). Use the menu on the left to move between them.';
+    return 'MedSafe has three areas for you: Home (a quick summary), My Prescriptions (every prescription you have saved) and Help (this guide). Use the menu on the left to move between them.';
   }
   if (/(log ?out|sign ?out)/.test(t)) {
     return "Tap your initial in the top right corner and choose \"Log out\".";
   }
   if (/(account|log ?in|sign ?up|password|email)/.test(t)) {
-    return "Your doctor matches reports to you using the name on your MedSafe account, so make sure it's entered correctly. For anything else about your account, use the menu in the top right.";
+    return 'Log in as a patient to save prescriptions to your account. If you scanned a QR code before logging in, log in or sign up as a patient and it will be saved for you automatically. For anything else about your account, use the menu in the top right.';
   }
   if (/(don'?t see|missing|not (showing|appearing)|can'?t find)/.test(t)) {
-    return 'If a prescription you\'re expecting isn\'t showing yet, ask your doctor to double-check they typed your name exactly as it appears on your MedSafe account, then check "My Prescriptions" again.';
+    return 'Prescriptions only appear in "My Prescriptions" after you save them. Scan the QR code from your doctor again and tap "Save to My Prescriptions" while you are logged in as a patient.';
   }
   if (/(thank|thanks|thx)/.test(t)) {
     return "You're welcome! Let me know if you need help finding anything else in the app.";
