@@ -5,7 +5,7 @@
    Set it to false for a real deployment so failures show an error instead
    of sample results.
 ------------------------------------------------------------------------- */
-export const API_URL = "http://127.0.0.1:8000";
+export const API_URL = "https://medsafe-api-sj17.onrender.com";
 export const ALLOW_DEMO_FALLBACK = false;
 
 /* -------------------------------------------------------------------------
